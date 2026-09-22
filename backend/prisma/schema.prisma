@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERADOR
+}
+
+enum SectorSlug {
+  ADMINISTRATIVO
+  PROCERT
+}
+
+enum PersonType {
+  PF
+  PJ
+}
+
+enum Modality {
+  VIDEOCONFERENCIA
+  PRESENCIAL
+}
+
+enum AppointmentStatus {
+  AGENDADO
+  CONFIRMADO
+  EM_ATENDIMENTO
+  REALIZADO
+  CANCELADO
+  REAGENDADO
+}
+
+enum WhatsAppMessageStatus {
+  PENDENTE
+  ENVIANDO
+  ENVIADA
+  ENTREGUE
+  LIDA
+  ERRO
+}
+
+enum WhatsAppMessageType {
+  NOVO_AGENDAMENTO
+  LEMBRETE_24H
+  LEMBRETE_2H
+  LEMBRETE_30MIN
+  CANCELAMENTO
+  REAGENDAMENTO
+  OUTRO
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(OPERADOR)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  appointmentsCreated Appointment[]            @relation("AppointmentCreatedBy")
+  statusHistoryLogs   AppointmentStatusHistory[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id           String     @id @default(uuid())
+  fullName     String
+  documentId   String?    // CPF/CNPJ
+  personType   PersonType @default(PF)
+  companyName  String?
+  phone        String?
+  whatsapp     String?
+  email        String?
+  notes        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  appointments Appointment[]
+
+  @@index([fullName])
+  @@index([documentId])
+  @@map("clients")
+}
+
+model Sector {
+  id        String     @id @default(uuid())
+  slug      SectorSlug @unique
+  name      String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  services     Service[]
+  appointments Appointment[]
+
+  @@map("sectors")
+}
+
+model Service {
+  id        String   @id @default(uuid())
+  sectorId  String
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sector       Sector        @relation(fields: [sectorId], references: [id])
+  appointments Appointment[]
+
+  @@map("services")
+}
+
+model Appointment {
+  id           String            @id @default(uuid())
+  clientId     String
+  sectorId     String
+  serviceId    String
+  modality     Modality
+  scheduledAt  DateTime          // data+hora combinadas, em UTC (America/Sao_Paulo na aplicação)
+  durationMin  Int               @default(30)
+  notes        String?
+  status       AppointmentStatus @default(AGENDADO)
+  createdById  String?
+  completedAt  DateTime?
+  completedBy  String?
+  cancelReason String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  client          Client                     @relation(fields: [clientId], references: [id])
+  sector          Sector                     @relation(fields: [sectorId], references: [id])
+  service         Service                    @relation(fields: [serviceId], references: [id])
+  createdBy       User?                      @relation("AppointmentCreatedBy", fields: [createdById], references: [id])
+  statusHistory   AppointmentStatusHistory[]
+  whatsappMessages WhatsAppMessage[]
+
+  @@index([scheduledAt])
+  @@index([status])
+  @@map("appointments")
+}
+
+model AppointmentStatusHistory {
+  id            String   @id @default(uuid())
+  appointmentId String
+  userId        String?
+  previousStatus AppointmentStatus?
+  newStatus     AppointmentStatus
+  note          String?
+  createdAt     DateTime @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  user        User?       @relation(fields: [userId], references: [id])
+
+  @@map("appointment_status_history")
+}
+
+model WhatsAppMessage {
+  id              String                 @id @default(uuid())
+  appointmentId   String?
+  recipientPhone  String
+  type            WhatsAppMessageType
+  content         String
+  status          WhatsAppMessageStatus  @default(PENDENTE)
+  metaMessageId   String?
+  errorMessage    String?
+  attempts        Int                    @default(0)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+
+  @@map("whatsapp_messages")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  type      String
+  payload   Json
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
