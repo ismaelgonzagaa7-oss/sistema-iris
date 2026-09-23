@@ -9,6 +9,15 @@ interface SendTextParams {
   appointmentId?: string;
 }
 
+interface WhatsAppApiResponse {
+  error?: {
+    message?: string;
+  };
+  messages?: Array<{
+    id?: string;
+  }>;
+}
+
 /**
  * Camada de serviço para a WhatsApp Business Platform / Cloud API (Meta).
  * Nunca usa QR Code / WhatsApp Web. Credenciais vêm exclusivamente de variáveis de ambiente.
@@ -19,14 +28,22 @@ export class WhatsAppService {
   }
 
   private isConfigured(): boolean {
-    return Boolean(env.whatsapp.accessToken && env.whatsapp.phoneNumberId);
+    return Boolean(
+      env.whatsapp.accessToken && env.whatsapp.phoneNumberId
+    );
   }
 
   /**
-   * Envia uma mensagem de texto livre. Só funciona dentro da janela de 24h de uma
-   * conversa iniciada pelo cliente, ou use templates aprovados (sendTemplate) fora dela.
+   * Envia uma mensagem de texto livre. Só funciona dentro da janela de 24h
+   * de uma conversa iniciada pelo cliente, ou use templates aprovados
+   * (sendTemplate) fora dela.
    */
-  async sendText({ to, body, type, appointmentId }: SendTextParams) {
+  async sendText({
+    to,
+    body,
+    type,
+    appointmentId,
+  }: SendTextParams) {
     const record = await prisma.whatsAppMessage.create({
       data: {
         appointmentId,
@@ -40,8 +57,13 @@ export class WhatsAppService {
     if (!env.whatsapp.notificationsEnabled) {
       await prisma.whatsAppMessage.update({
         where: { id: record.id },
-        data: { status: WhatsAppMessageStatus.PENDENTE, errorMessage: "Notificações desativadas em configurações." },
+        data: {
+          status: WhatsAppMessageStatus.PENDENTE,
+          errorMessage:
+            "Notificações desativadas em configurações.",
+        },
       });
+
       return record;
     }
 
@@ -50,16 +72,23 @@ export class WhatsAppService {
         where: { id: record.id },
         data: {
           status: WhatsAppMessageStatus.ERRO,
-          errorMessage: "WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID não configurados.",
+          errorMessage:
+            "WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID não configurados.",
         },
       });
+
       return record;
     }
 
     try {
       await prisma.whatsAppMessage.update({
         where: { id: record.id },
-        data: { status: WhatsAppMessageStatus.ENVIANDO, attempts: { increment: 1 } },
+        data: {
+          status: WhatsAppMessageStatus.ENVIANDO,
+          attempts: {
+            increment: 1,
+          },
+        },
       });
 
       const response = await fetch(this.baseUrl(), {
@@ -72,37 +101,55 @@ export class WhatsAppService {
           messaging_product: "whatsapp",
           to,
           type: "text",
-          text: { body },
+          text: {
+            body,
+          },
         }),
       });
 
-      const data = await response.json();
+      const data =
+        (await response.json()) as WhatsAppApiResponse;
 
       if (!response.ok) {
-        const data = (await response.json()) as {
-  error?: {
-    message?: string;
-  };
-  messages?: Array<{
-    id?: string;
-  }>;
-};
+        const errorMessage =
+          data?.error?.message ||
+          "Erro ao enviar mensagem pelo WhatsApp.";
+
         await prisma.whatsAppMessage.update({
           where: { id: record.id },
-          data: { status: WhatsAppMessageStatus.ERRO, errorMessage },
+          data: {
+            status: WhatsAppMessageStatus.ERRO,
+            errorMessage,
+          },
         });
+
         return record;
       }
 
-      const metaMessageId = data?.messages?.[0]?.id;
-      return prisma.whatsAppMessage.update({
+      const metaMessageId =
+        data?.messages?.[0]?.id;
+
+      await prisma.whatsAppMessage.update({
         where: { id: record.id },
-        data: { status: WhatsAppMessageStatus.ENVIADA, metaMessageId },
+        data: {
+          status: WhatsAppMessageStatus.ENVIADA,
+          metaMessageId,
+        },
       });
-    } catch (err: any) {
+
+      return record;
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Erro desconhecido.";
+
       return prisma.whatsAppMessage.update({
         where: { id: record.id },
-        data: { status: WhatsAppMessageStatus.ERRO, errorMessage: err?.message || "Erro desconhecido." },
+        data: {
+          status: WhatsAppMessageStatus.ERRO,
+          errorMessage,
+        },
       });
     }
   }
@@ -174,4 +221,5 @@ export class WhatsAppService {
   }
 }
 
-export const whatsAppService = new WhatsAppService();
+export const whatsAppService =
+  new WhatsAppService();
