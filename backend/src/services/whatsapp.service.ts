@@ -79,7 +79,14 @@ export class WhatsAppService {
       const data = await response.json();
 
       if (!response.ok) {
-        const errorMessage = data?.error?.message || `Erro HTTP ${response.status}`;
+        const data = (await response.json()) as {
+  error?: {
+    message?: string;
+  };
+  messages?: Array<{
+    id?: string;
+  }>;
+};
         await prisma.whatsAppMessage.update({
           where: { id: record.id },
           data: { status: WhatsAppMessageStatus.ERRO, errorMessage },
